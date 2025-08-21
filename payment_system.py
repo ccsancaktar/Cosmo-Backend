@@ -1,0 +1,903 @@
+#!/usr/bin/env python3
+"""
+Ödeme Sistemi - Stripe Entegrasyonu
+Token satın alma ve premium subscription için
+"""
+
+import stripe
+import os
+from flask import Blueprint, request, jsonify, current_app
+from flask_jwt_extended import jwt_required, get_jwt_identity
+from models import db, User, TokenTransaction, TokenPackage, PremiumSubscription
+from datetime import datetime, timedelta
+from dotenv import load_dotenv
+import logging
+
+# Logging konfigürasyonu
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# .env dosyasını yükle
+load_dotenv()
+
+# Stripe konfigürasyonu
+stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
+STRIPE_PUBLISHABLE_KEY = os.getenv('STRIPE_PUBLISHABLE_KEY')
+
+# Blueprint oluştur
+payment_bp = Blueprint('payment', __name__)
+
+class PaymentSystem:
+    """Ödeme sistemi ana sınıfı"""
+    
+    @staticmethod
+    def create_payment_intent(amount, currency='try', metadata=None):
+        """Ödeme intent'i oluştur"""
+        try:
+            intent = stripe.PaymentIntent.create(
+                amount=int(amount * 100),  # Stripe kuruş cinsinden çalışır
+                currency=currency,
+                metadata=metadata or {},
+                automatic_payment_methods={
+                    'enabled': True,
+                }
+            )
+            return intent
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe payment intent hatası: {e}")
+            return None
+    
+    @staticmethod
+    def create_subscription(customer_id, price_id, metadata=None):
+        """Subscription oluştur"""
+        try:
+            subscription = stripe.Subscription.create(
+                customer=customer_id,
+                items=[{'price': price_id}],
+                metadata=metadata or {},
+                payment_behavior='default_incomplete',
+                payment_settings={'save_default_payment_method': 'on_subscription'},
+                expand=['latest_invoice.payment_intent'],
+            )
+            return subscription
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe subscription hatası: {e}")
+            return None
+    
+    @staticmethod
+    def create_customer(email, name, metadata=None):
+        """Stripe customer oluştur"""
+        try:
+            customer = stripe.Customer.create(
+                email=email,
+                name=name,
+                metadata=metadata or {}
+            )
+            return customer
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe customer hatası: {e}")
+            return None
+    
+    @staticmethod
+    def verify_webhook_signature(payload, sig_header, webhook_secret):
+        """Webhook imzasını doğrula"""
+        try:
+            event = stripe.Webhook.construct_event(
+                payload, sig_header, webhook_secret
+            )
+            return event
+        except ValueError as e:
+            logger.error(f"Invalid payload: {e}")
+            return None
+        except stripe.error.SignatureVerificationError as e:
+            logger.error(f"Invalid signature: {e}")
+            return None
+
+# Token satın alma endpoint'i
+@payment_bp.route('/create-token-payment', methods=['POST'])
+@jwt_required()
+def create_token_payment():
+    """Token paketi için ödeme intent'i oluştur"""
+    try:
+        user_id = get_jwt_identity()
+        user = User.find_by_id(user_id)
+        
+        if not user:
+            return jsonify({'error': 'Kullanıcı bulunamadı'}), 404
+        
+        data = request.get_json()
+        package_id = data.get('package_id')
+        
+        if not package_id:
+            return jsonify({'error': 'Paket ID gereklidir'}), 400
+        
+        # Paketi bul - ObjectId'ye çevir
+        try:
+            from bson import ObjectId
+            logger.info(f"Paket ID alındı: {package_id}, tipi: {type(package_id)}")
+            package_object_id = ObjectId(package_id)
+            logger.info(f"ObjectId'ye çevrildi: {package_object_id}")
+            
+            # Mevcut paketleri logla
+            all_packages = list(db.token_packages.find({}))
+            logger.info(f"Veritabanındaki tüm paketler: {[str(pkg['_id']) for pkg in all_packages]}")
+            
+            package_data = db.token_packages.find_one({'_id': package_object_id})
+            if not package_data:
+                logger.error(f"Paket bulunamadı. Aranan ID: {package_object_id}")
+                return jsonify({'error': 'Paket bulunamadı'}), 404
+            
+            logger.info(f"Paket bulundu: {package_data}")
+        except Exception as e:
+            logger.error(f"Geçersiz paket ID formatı: {package_id}, hata: {e}")
+            return jsonify({'error': 'Geçersiz paket ID formatı'}), 400
+        
+        # Stripe customer oluştur veya mevcut olanı bul
+        customer = None
+        if hasattr(user, 'stripe_customer_id') and user.stripe_customer_id:
+            try:
+                customer = stripe.Customer.retrieve(user.stripe_customer_id)
+            except stripe.error.StripeError:
+                customer = None
+        
+        if not customer:
+            customer = PaymentSystem.create_customer(
+                email=user.email,
+                name=f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username,
+                metadata={'user_id': str(user._id)}
+            )
+            if customer:
+                # Kullanıcıya stripe_customer_id ekle
+                db.users.update_one(
+                    {'_id': user._id},
+                    {'$set': {'stripe_customer_id': customer.id}}
+                )
+                # User objesini de güncelle
+                user.stripe_customer_id = customer.id
+        
+        # Ödeme intent'i oluştur
+        amount = float(package_data['price'])
+        metadata = {
+            'user_id': str(user._id),
+            'package_id': str(package_id),
+            'package_name': package_data['name'],
+            'token_amount': str(package_data['token_amount']),
+            'type': 'token_purchase'
+        }
+        
+        payment_intent = PaymentSystem.create_payment_intent(
+            amount=amount,
+            currency='try',
+            metadata=metadata
+        )
+        
+        if not payment_intent:
+            return jsonify({'error': 'Ödeme intent oluşturulamadı'}), 500
+        
+        # ObjectId'leri string'e çevir
+        package_response = {
+            'id': str(package_data['_id']),
+            'name': package_data['name'],
+            'token_amount': package_data['token_amount'],
+            'price': package_data['price'],
+            'description': package_data['description'],
+            'is_active': package_data['is_active']
+        }
+        
+        return jsonify({
+            'client_secret': payment_intent.client_secret,
+            'publishable_key': STRIPE_PUBLISHABLE_KEY,
+            'amount': amount,
+            'currency': 'try',
+            'package': package_response
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Token ödeme hatası: {e}")
+        return jsonify({'error': f'Ödeme hatası: {str(e)}'}), 500
+
+# Premium subscription endpoint'i
+@payment_bp.route('/create-premium-subscription', methods=['POST'])
+@jwt_required()
+def create_premium_subscription():
+    """Premium subscription için ödeme intent'i oluştur"""
+    try:
+        user_id = get_jwt_identity()
+        user = User.find_by_id(user_id)
+        
+        if not user:
+            return jsonify({'error': 'Kullanıcı bulunamadı'}), 404
+        
+        data = request.get_json()
+        plan_type = data.get('plan_type')
+        
+        if not plan_type:
+            return jsonify({'error': 'Plan türü gereklidir'}), 400
+        
+        # Plan fiyatlarını kontrol et
+        plan_prices = {
+            'premium_monthly': 29.99,
+            'premium_yearly': 299.99,
+            'premium_plus_monthly': 49.99,
+            'premium_plus_yearly': 499.99
+        }
+        
+        if plan_type not in plan_prices:
+            return jsonify({'error': 'Geçersiz plan türü'}), 400
+        
+        price = plan_prices[plan_type]
+        
+        # Stripe customer oluştur veya mevcut olanı bul
+        customer = None
+        if hasattr(user, 'stripe_customer_id') and user.stripe_customer_id:
+            try:
+                customer = stripe.Customer.retrieve(user.stripe_customer_id)
+            except stripe.error.StripeError:
+                customer = None
+        
+        if not customer:
+            customer = PaymentSystem.create_customer(
+                email=user.email,
+                name=f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username,
+                metadata={'user_id': str(user._id)}
+            )
+            if customer:
+                # Kullanıcıya stripe_customer_id ekle
+                db.users.update_one(
+                    {'_id': user._id},
+                    {'$set': {'stripe_customer_id': customer.id}}
+                )
+                # User objesini de güncelle
+                user.stripe_customer_id = customer.id
+        
+        # Ödeme intent'i oluştur
+        metadata = {
+            'user_id': str(user._id),
+            'plan_type': plan_type,
+            'type': 'premium_subscription'
+        }
+        
+        payment_intent = PaymentSystem.create_payment_intent(
+            amount=price,
+            currency='try',
+            metadata=metadata
+        )
+        
+        if not payment_intent:
+            return jsonify({'error': 'Ödeme intent oluşturulamadı'}), 500
+        
+        return jsonify({
+            'client_secret': payment_intent.client_secret,
+            'publishable_key': STRIPE_PUBLISHABLE_KEY,
+            'amount': price,
+            'currency': 'try',
+            'plan_type': plan_type
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Premium subscription hatası: {e}")
+        return jsonify({'error': f'Subscription hatası: {str(e)}'}), 500
+
+# Webhook endpoint'i
+@payment_bp.route('/webhook/stripe', methods=['POST'])
+def stripe_webhook():
+    """Stripe webhook'larını işle"""
+    try:
+        payload = request.get_data()
+        sig_header = request.headers.get('Stripe-Signature')
+        
+        logger.info(f"Webhook alındı: {request.headers.get('Stripe-Event-Type', 'Unknown')}")
+        logger.info(f"Payload boyutu: {len(payload)} bytes")
+        logger.info(f"Signature header: {sig_header[:50] if sig_header else 'None'}...")
+        
+        # Webhook secret'ı environment'tan al
+        webhook_secret = os.getenv('STRIPE_WEBHOOK_SECRET')
+        if not webhook_secret:
+            logger.error("STRIPE_WEBHOOK_SECRET bulunamadı")
+            return jsonify({'error': 'Webhook secret bulunamadı'}), 500
+        
+        # Webhook imzasını doğrula
+        try:
+            event = PaymentSystem.verify_webhook_signature(
+                payload, sig_header, webhook_secret
+            )
+            
+            if not event:
+                logger.error("Webhook doğrulama başarısız")
+                return jsonify({'error': 'Webhook doğrulama başarısız'}), 400
+                
+            logger.info(f"Webhook doğrulandı: {event['type']}")
+            
+        except Exception as e:
+            logger.error(f"Webhook doğrulama hatası: {e}")
+            return jsonify({'error': f'Webhook doğrulama hatası: {str(e)}'}), 400
+        
+        # Event türüne göre işle
+        if event['type'] == 'payment_intent.succeeded':
+            # Ödeme başarılı olduğunda payment intent'i tekrar kontrol et
+            payment_intent = event['data']['object']
+            logger.info(f"Payment intent başarılı: {payment_intent.id}, status: {payment_intent.status}")
+            
+            if payment_intent.status == 'succeeded':
+                logger.info("handle_payment_success çağrılıyor...")
+                handle_payment_success(payment_intent)
+                logger.info("handle_payment_success tamamlandı")
+            else:
+                logger.warning(f"Payment intent başarısız: {payment_intent.id}, status: {payment_intent.status}")
+        elif event['type'] == 'payment_intent.payment_failed':
+            logger.info(f"Payment intent başarısız: {event['data']['object'].id}")
+            handle_payment_failure(event['data']['object'])
+        elif event['type'] == 'invoice.payment_succeeded':
+            logger.info(f"Invoice ödeme başarılı: {event['data']['object'].id}")
+            handle_subscription_payment(event['data']['object'])
+        elif event['type'] == 'customer.subscription.deleted':
+            logger.info(f"Subscription iptal edildi: {event['data']['object'].id}")
+            handle_subscription_cancellation(event['data']['object'])
+        else:
+            logger.info(f"Bilinmeyen event türü: {event['type']}")
+        
+        return jsonify({'status': 'success'}), 200
+        
+    except Exception as e:
+        logger.error(f"Webhook hatası: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
+
+def handle_payment_success(payment_intent):
+    """Başarılı ödeme işle"""
+    try:
+        logger.info(f"handle_payment_success başladı: {payment_intent.id}")
+        
+        metadata = payment_intent.metadata
+        user_id = metadata.get('user_id')
+        payment_type = metadata.get('type')
+        
+        logger.info(f"Metadata: user_id={user_id}, type={payment_type}")
+        
+        if not user_id:
+            logger.error("Payment intent'te user_id bulunamadı")
+            return
+        
+        if payment_type == 'token_purchase':
+            # Token satın alma işlemi
+            package_id = metadata.get('package_id')
+            token_amount = int(metadata.get('token_amount', 0))
+            
+            logger.info(f"Token satın alma işlemi: package_id={package_id}, token_amount={token_amount}")
+            
+            if package_id and token_amount > 0:
+                # Token transaction kaydet
+                try:
+                    transaction = TokenTransaction(
+                        user_id=user_id,
+                        transaction_type='purchase',
+                        amount=token_amount,
+                        description=f"Stripe ile {token_amount} token satın alındı",
+                        package_id=package_id,
+                        stripe_payment_intent_id=payment_intent.id
+                    )
+                    logger.info("TokenTransaction objesi oluşturuldu")
+                    
+                    transaction.save()
+                    logger.info(f"Token transaction kaydedildi: {transaction._id}")
+                    
+                    # Kullanıcı bakiyesini güncelle
+                    try:
+                        user = User.find_by_id(user_id)
+                        if user:
+                            logger.info(f"Kullanıcı bulundu: {user.username}")
+                            # Token bakiyesini güncelle
+                            old_balance = user.token_balance
+                            user.update_token_balance()
+                            new_balance = user.token_balance
+                            logger.info(f"Kullanıcı {user_id} token bakiyesi güncellendi: {old_balance} -> {new_balance}")
+                        else:
+                            logger.error(f"Kullanıcı {user_id} bulunamadı")
+                    except Exception as e:
+                        logger.error(f"Token bakiye güncelleme hatası: {e}")
+                        import traceback
+                        logger.error(f"Traceback: {traceback.format_exc()}")
+                    
+                    logger.info(f"Token satın alma başarılı: User {user_id}, Amount {token_amount}")
+                    
+                except Exception as e:
+                    logger.error(f"Token transaction kaydetme hatası: {e}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+            else:
+                logger.error(f"Geçersiz package_id veya token_amount: package_id={package_id}, token_amount={token_amount}")
+        
+        elif payment_type == 'premium_subscription':
+            # Premium subscription işlemi
+            plan_type = metadata.get('plan_type')
+            logger.info(f"Premium subscription işlemi: plan_type={plan_type}")
+            
+            if plan_type:
+                try:
+                    # Önce mevcut aktif subscription'ları kontrol et ve pasif yap
+                    existing_subscriptions = db.premium_subscriptions.find({
+                        'user_id': user_id,
+                        'is_active': True
+                    })
+                    
+                    logger.info(f"Mevcut aktif subscription sayısı: {existing_subscriptions.count()}")
+                    
+                    for existing_sub in existing_subscriptions:
+                        db.premium_subscriptions.update_one(
+                            {'_id': existing_sub['_id']},
+                            {
+                                '$set': {
+                                    'is_active': False,
+                                    'auto_renew': False,
+                                    'cancelled_at': datetime.now()
+                                }
+                            }
+                        )
+                        logger.info(f"Eski subscription pasif yapıldı: {existing_sub['_id']}")
+                    
+                    # Subscription süresini hesapla
+                    if 'monthly' in plan_type:
+                        duration = timedelta(days=30)
+                    elif 'yearly' in plan_type:
+                        duration = timedelta(days=365)
+                    else:
+                        duration = timedelta(days=30)
+                    
+                    # Premium subscription oluştur
+                    subscription = PremiumSubscription(
+                        user_id=user_id,
+                        plan_type=plan_type,
+                        start_date=datetime.now(),
+                        end_date=datetime.now() + duration,
+                        is_active=True,
+                        auto_renew=True,
+                        stripe_payment_intent_id=payment_intent.id
+                    )
+                    
+                    logger.info("PremiumSubscription objesi oluşturuldu")
+                    subscription.save()
+                    logger.info(f"Premium subscription kaydedildi: {subscription._id}")
+                    
+                    logger.info(f"Premium subscription başarılı: User {user_id}, Plan {plan_type}")
+                    
+                except Exception as e:
+                    logger.error(f"Premium subscription oluşturma hatası: {e}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+            else:
+                logger.error("Premium subscription için plan_type bulunamadı")
+        
+        else:
+            logger.warning(f"Bilinmeyen payment type: {payment_type}")
+        
+        logger.info(f"handle_payment_success tamamlandı: {payment_intent.id}")
+        
+    except Exception as e:
+        logger.error(f"Payment success handling hatası: {e}")
+        # Hata durumunda log'u detaylandır
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+
+def handle_payment_failure(payment_intent):
+    """Başarısız ödeme işle"""
+    try:
+        metadata = payment_intent.metadata
+        user_id = metadata.get('user_id')
+        payment_type = metadata.get('type')
+        
+        logger.warning(f"Ödeme başarısız: User {user_id}, Intent {payment_intent.id}, Type {payment_type}")
+        
+        # Eğer premium subscription ödemesi başarısız olduysa, subscription'ı iptal et
+        if payment_type == 'premium_subscription':
+            # Bu payment intent ile oluşturulan subscription'ı bul ve iptal et
+            subscription = db.premium_subscriptions.find_one({
+                'stripe_payment_intent_id': payment_intent.id
+            })
+            
+            if subscription:
+                db.premium_subscriptions.update_one(
+                    {'_id': subscription['_id']},
+                    {
+                        '$set': {
+                            'is_active': False,
+                            'auto_renew': False,
+                            'cancelled_at': datetime.now()
+                        }
+                    }
+                )
+                logger.info(f"Başarısız ödeme nedeniyle subscription iptal edildi: {subscription['_id']}")
+        
+        # Kullanıcıya bildirim gönder (opsiyonel)
+        # send_payment_failure_notification(user_id)
+        
+    except Exception as e:
+        logger.error(f"Payment failure handling hatası: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+
+def handle_subscription_payment(invoice):
+    """Subscription ödeme işle"""
+    try:
+        subscription_id = invoice.subscription
+        customer_id = invoice.customer
+        
+        # Customer'dan user_id'yi bul
+        user = db.users.find_one({'stripe_customer_id': customer_id})
+        if not user:
+            logger.error(f"Customer {customer_id} için user bulunamadı")
+            return
+        
+        # Subscription'ı güncelle
+        result = db.premium_subscriptions.update_one(
+            {'user_id': str(user['_id'])},
+            {
+                '$set': {
+                                    'last_payment_date': datetime.now(),
+                'next_payment_date': datetime.now() + timedelta(days=30)
+                }
+            }
+        )
+        
+        if result.modified_count > 0:
+            logger.info(f"Subscription ödeme başarılı: User {user['_id']}")
+        else:
+            logger.warning(f"Subscription güncellenemedi: User {user['_id']}")
+        
+    except Exception as e:
+        logger.error(f"Subscription payment handling hatası: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+
+def handle_subscription_cancellation(subscription):
+    """Subscription iptal işle"""
+    try:
+        customer_id = subscription.customer
+        
+        # Customer'dan user_id'yi bul
+        user = db.users.find_one({'stripe_customer_id': customer_id})
+        if not user:
+            logger.error(f"Customer {customer_id} için user bulunamadı")
+            return
+        
+        # Subscription'ı pasif yap
+        result = db.premium_subscriptions.update_one(
+            {'user_id': str(user['_id'])},
+            {
+                '$set': {
+                    'is_active': False,
+                    'auto_renew': False,
+                    'cancelled_at': datetime.now()
+                }
+            }
+        )
+        
+        if result.modified_count > 0:
+            logger.info(f"Subscription iptal edildi: User {user['_id']}")
+        else:
+            logger.warning(f"Subscription iptal edilemedi: User {user['_id']}")
+        
+    except Exception as e:
+        logger.error(f"Subscription cancellation handling hatası: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+
+# Ödeme durumu kontrol endpoint'i
+@payment_bp.route('/payment-status/<payment_intent_id>', methods=['GET'])
+@jwt_required()
+def get_payment_status(payment_intent_id):
+    """Ödeme durumunu kontrol et"""
+    try:
+        user_id = get_jwt_identity()
+        
+        # Payment intent'i Stripe'dan al
+        payment_intent = stripe.PaymentIntent.retrieve(payment_intent_id)
+        
+        if not payment_intent:
+            return jsonify({'error': 'Ödeme bulunamadı'}), 404
+        
+        # Kullanıcının kendi ödemesi mi kontrol et
+        metadata = payment_intent.metadata
+        if metadata.get('user_id') != user_id:
+            return jsonify({'error': 'Bu ödeme size ait değil'}), 403
+        
+        return jsonify({
+            'status': payment_intent.status,
+            'amount': payment_intent.amount / 100,  # Kuruş'tan TL'ye çevir
+            'currency': payment_intent.currency,
+            'created': payment_intent.created,
+            'metadata': metadata
+        }), 200
+        
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe status check hatası: {e}")
+        return jsonify({'error': f'Ödeme durumu kontrol hatası: {str(e)}'}), 500
+    except Exception as e:
+        logger.error(f"Payment status check hatası: {e}")
+        return jsonify({'error': f'Genel hata: {str(e)}'}), 500
+
+# Ödeme geçmişi endpoint'i
+@payment_bp.route('/payment-history', methods=['GET'])
+@jwt_required()
+def get_payment_history():
+    """Kullanıcının ödeme geçmişini getir"""
+    try:
+        user_id = get_jwt_identity()
+        user = User.find_by_id(user_id)
+        
+        if not user:
+            return jsonify({'error': 'Kullanıcı bulunamadı'}), 404
+        
+        # Stripe customer ID varsa ödeme geçmişini al
+        if hasattr(user, 'stripe_customer_id') and user.stripe_customer_id:
+            try:
+                payments = stripe.PaymentIntent.list(
+                    customer=user.stripe_customer_id,
+                    limit=50
+                )
+                
+                payment_history = []
+                for payment in payments.data:
+                    payment_history.append({
+                        'id': payment.id,
+                        'amount': payment.amount / 100,
+                        'currency': payment.currency,
+                        'status': payment.status,
+                        'created': payment.created,
+                        'metadata': payment.metadata
+                    })
+                
+                return jsonify({
+                    'payments': payment_history,
+                    'total_count': len(payment_history)
+                }), 200
+                
+            except stripe.error.StripeError as e:
+                logger.error(f"Stripe payment history hatası: {e}")
+                return jsonify({'error': 'Ödeme geçmişi alınamadı'}), 500
+        
+        return jsonify({'payments': [], 'total_count': 0}), 200
+        
+    except Exception as e:
+        logger.error(f"Payment history hatası: {e}")
+        return jsonify({'error': f'Ödeme geçmişi hatası: {str(e)}'}), 500
+
+# Token paketlerini listele endpoint'i
+@payment_bp.route('/token-packages', methods=['GET'])
+def get_token_packages():
+    """Aktif token paketlerini listele"""
+    try:
+        packages = TokenPackage.find_all_active()
+        packages_list = [package.to_dict() for package in packages]
+        
+        return jsonify({
+            'packages': packages_list,
+            'total_count': len(packages_list)
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Token paketleri listeleme hatası: {e}")
+        return jsonify({'error': f'Paket listeleme hatası: {str(e)}'}), 500
+
+# Test ödeme (sadece development)
+@payment_bp.route('/test-payment', methods=['POST'])
+def test_payment():
+    """Test ödeme (sadece development ortamında)"""
+    try:
+        data = request.get_json()
+        amount = data.get('amount', 10.0)
+        user_id = data.get('user_id')
+        payment_type = data.get('type', 'token_purchase')
+        
+        if not user_id:
+            return jsonify({'error': 'user_id gereklidir'}), 400
+        
+        # Test için fake payment intent oluştur
+        test_payment_intent = type('TestPaymentIntent', (), {
+            'id': f'test_pi_{datetime.utcnow().timestamp()}',
+            'status': 'succeeded',
+            'metadata': {
+                'user_id': user_id,
+                'type': payment_type,
+                'package_id': 'test_package',
+                'token_amount': '100',
+                'plan_type': 'premium_monthly'
+            }
+        })()
+        
+        # Test ödeme işlemini simüle et
+        try:
+            if payment_type == 'token_purchase':
+                handle_payment_success(test_payment_intent)
+            elif payment_type == 'premium_subscription':
+                handle_payment_success(test_payment_intent)
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'Test ödeme başarılı: {payment_type}',
+                'payment_intent_id': test_payment_intent.id
+            }), 200
+            
+        except Exception as e:
+            logger.error(f"Test ödeme işlemi hatası: {e}")
+            return jsonify({
+                'status': 'error',
+                'message': f'Test ödeme işlemi hatası: {str(e)}',
+                'error_details': str(e)
+            }), 500
+        
+    except Exception as e:
+        logger.error(f"Test ödeme hatası: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({'error': f'Test ödeme hatası: {str(e)}'}), 500
+
+# Webhook test endpoint'i
+@payment_bp.route('/test-webhook', methods=['POST'])
+def test_webhook():
+    """Webhook test endpoint'i (sadece development)"""
+    try:
+        data = request.get_json()
+        event_type = data.get('event_type', 'payment_intent.succeeded')
+        user_id = data.get('user_id')
+        payment_type = data.get('type', 'token_purchase')
+        
+        if not user_id:
+            return jsonify({'error': 'user_id gereklidir'}), 400
+        
+        logger.info(f"Test webhook çağrıldı: event_type={event_type}, user_id={user_id}, type={payment_type}")
+        
+        # Test event oluştur
+        test_event = {
+            'type': event_type,
+            'data': {
+                'object': type('TestPaymentIntent', (), {
+                    'id': f'test_pi_{datetime.now().timestamp()}',
+                    'status': 'succeeded',
+                    'metadata': {
+                        'user_id': user_id,
+                        'type': payment_type,
+                        'package_id': 'test_package',
+                        'token_amount': '100',
+                        'plan_type': 'premium_monthly'
+                    }
+                })()
+            }
+        }
+        
+        logger.info("Test event oluşturuldu, handle_payment_success çağrılıyor...")
+        
+        # Test event'i işle
+        if event_type == 'payment_intent.succeeded':
+            handle_payment_success(test_event['data']['object'])
+        elif event_type == 'payment_intent.payment_failed':
+            handle_payment_failure(test_event['data']['object'])
+        
+        logger.info("Test webhook başarıyla tamamlandı")
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Test webhook başarılı: {event_type}',
+            'event_type': event_type
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Test webhook hatası: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({'error': f'Test webhook hatası: {str(e)}'}), 500
+
+# Manuel token yükleme endpoint'i (development için)
+@payment_bp.route('/manual-token-load', methods=['POST'])
+@jwt_required()
+def manual_token_load():
+    """Manuel token yükleme (development için)"""
+    try:
+        user_id = get_jwt_identity()
+        data = request.get_json()
+        package_id = data.get('package_id')
+        token_amount = data.get('token_amount')
+        payment_intent_id = data.get('payment_intent_id')
+        
+        if not all([package_id, token_amount]):
+            return jsonify({'error': 'package_id ve token_amount gereklidir'}), 400
+        
+        logger.info(f"Manuel token yükleme: User {user_id}, Package {package_id}, Amount {token_amount}")
+        
+        # Token transaction kaydet
+        transaction = TokenTransaction(
+            user_id=str(user_id),
+            transaction_type='purchase',
+            amount=int(token_amount),
+            description=f"Manuel token yükleme: {token_amount} token",
+            package_id=package_id,
+            stripe_payment_intent_id=payment_intent_id
+        )
+        transaction.save()
+        
+        # Kullanıcı bakiyesini güncelle
+        user = User.find_by_id(user_id)
+        if user:
+            old_balance = user.token_balance
+            user.update_token_balance()
+            new_balance = user.token_balance
+            logger.info(f"Token bakiye güncellendi: {old_balance} -> {new_balance}")
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'{token_amount} token başarıyla yüklendi',
+            'new_balance': new_balance
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Manuel token yükleme hatası: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({'error': f'Token yükleme hatası: {str(e)}'}), 500
+
+# Manuel premium subscription endpoint'i (development için)
+@payment_bp.route('/manual-premium-activate', methods=['POST'])
+@jwt_required()
+def manual_premium_activate():
+    """Manuel premium activation (development için)"""
+    try:
+        user_id = get_jwt_identity()
+        data = request.get_json()
+        plan_type = data.get('plan_type')
+        payment_intent_id = data.get('payment_intent_id')
+        
+        if not plan_type:
+            return jsonify({'error': 'plan_type gereklidir'}), 400
+        
+        logger.info(f"Manuel premium activation: User {user_id}, Plan {plan_type}")
+        
+        # Önce mevcut aktif subscription'ları pasif yap
+        existing_subscriptions = db.premium_subscriptions.find({
+            'user_id': str(user_id),
+            'is_active': True
+        })
+        
+        for existing_sub in existing_subscriptions:
+            db.premium_subscriptions.update_one(
+                {'_id': existing_sub['_id']},
+                {
+                    '$set': {
+                        'is_active': False,
+                        'auto_renew': False,
+                        'cancelled_at': datetime.now()
+                    }
+                }
+            )
+        
+        # Subscription süresini hesapla
+        if 'monthly' in plan_type:
+            duration = timedelta(days=30)
+        elif 'yearly' in plan_type:
+            duration = timedelta(days=365)
+        else:
+            duration = timedelta(days=30)
+        
+        # Premium subscription oluştur
+        subscription = PremiumSubscription(
+            user_id=str(user_id),
+            plan_type=plan_type,
+            start_date=datetime.now(),
+            end_date=datetime.now() + duration,
+            is_active=True,
+            auto_renew=True,
+            stripe_payment_intent_id=payment_intent_id
+        )
+        subscription.save()
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Premium üyelik aktif edildi: {plan_type}',
+            'plan_type': plan_type,
+            'end_date': subscription.end_date.isoformat()
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Manuel premium activation hatası: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({'error': f'Premium activation hatası: {str(e)}'}), 500
