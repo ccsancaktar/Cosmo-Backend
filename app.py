@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify, send_from_directory
+from monitoring import *
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
 import os
@@ -20,6 +21,7 @@ from chinese_data import calculate_ba_zi, ELEMENTS
 from tarot_data import get_random_tarot_cards, get_card_description
 from prompts.multilingual import get_prompt_by_language
 from rate_limiting import create_limiter, fal_rate_limit, daily_fal_rate_limit, get_rate_limit_info
+from monitoring import monitoring_bp
 from redis_manager import redis_manager
 from notifications import NotificationService
 from scheduler import setup_scheduler, stop_scheduler
@@ -74,6 +76,7 @@ limiter.exempt(tokens_bp)
 app.register_blueprint(tokens_bp, url_prefix='/api/tokens')
 app.register_blueprint(premium_bp, url_prefix='/api/premium')
 app.register_blueprint(payment_bp, url_prefix='/api/payment')
+app.register_blueprint(monitoring_bp, url_prefix="/api/monitoring")
 
 # Notification service'i başlat
 notification_service = NotificationService()
