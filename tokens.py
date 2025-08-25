@@ -145,7 +145,7 @@ def video_reward():
             'created_at': {'$gte': last_24_hours}
         })
         
-        daily_limit = 5  # Sabit günlük limit
+        daily_limit = int(os.environ.get("FREE_DAILY_VIDEO_LIMIT", 3))  # Environment variable
         if videos_last_24h >= daily_limit:
             return jsonify({'error': 'Günlük video limiti doldu'}), 400
         
@@ -193,7 +193,7 @@ def video_limit_status():
             'created_at': {'$gte': last_24_hours}
         })
         
-        daily_limit = 5  # Sabit günlük limit
+        daily_limit = int(os.environ.get("FREE_DAILY_VIDEO_LIMIT", 3))  # Environment variable
         limit_reached = videos_last_24h >= daily_limit
         
         # En eski video'nun tarihini bul (reset zamanı hesaplaması için)
@@ -251,7 +251,7 @@ def daily_bonus():
             }), 400
         
         # Bonus token ver
-        bonus_amount = 5  # Sabit 5 token
+        bonus_amount = int(os.environ.get("FREE_DAILY_BONUS_TOKENS", 3))  # Environment variable
         transaction = TokenTransaction(
             user_id=str(user._id),
             transaction_type='daily_bonus',
@@ -349,7 +349,7 @@ def spend_tokens_for_reading(user_id, reading_type):
 def add_registration_bonus(user_id):
     """Yeni kullanıcıya kayıt bonusu ver"""
     try:
-        bonus_amount = 50  # Sabit 50 token
+        bonus_amount = int(os.environ.get("REGISTRATION_BONUS_TOKENS", 8))  # Environment variable
         transaction = TokenTransaction(
             user_id=user_id,
             transaction_type='registration_bonus',

@@ -22,7 +22,7 @@ def create_limiter(app):
     limiter = Limiter(
         app=app,
         key_func=get_remote_address,
-        default_limits=["200 per day", "50 per hour"],
+        default_limits=["50000 per day", "5000 per hour"],  # Gerçekçi limitler
         storage_uri=storage_uri
     )
     return limiter
@@ -102,7 +102,7 @@ def fal_rate_limit():
     # Production'da daha sıkı limitler
     if os.getenv('FLASK_ENV') == 'production':
         return user_rate_limit(
-            max_requests=3,  # 3 fal per hour in production
+            max_requests=5,  # 5 fal per hour in production
             window_seconds=3600,  # 1 saat
             error_message="Saatlik fal limiti aşıldı. Lütfen 1 saat sonra tekrar deneyin."
         )
@@ -120,7 +120,7 @@ def daily_fal_rate_limit():
     # Production'da daha sıkı limitler
     if os.getenv('FLASK_ENV') == 'production':
         return user_rate_limit(
-            max_requests=5,  # 5 fal per day in production
+            max_requests=15,  # 15 fal per day in production
             window_seconds=86400,  # 24 saat
             error_message="Günlük fal limiti aşıldı. Lütfen yarın tekrar deneyin."
         )
@@ -134,7 +134,7 @@ def daily_fal_rate_limit():
 def auth_rate_limit():
     """Authentication için rate limiting - IP bazlı"""
     return ip_rate_limit(
-        max_requests=5,  # 5 attempt per hour
+        max_requests=10,  # 10 attempt per hour
         window_seconds=3600,  # 1 saat
         error_message="Çok fazla giriş denemesi. Lütfen 1 saat bekleyin."
     )
@@ -142,7 +142,7 @@ def auth_rate_limit():
 def registration_rate_limit():
     """Kayıt için rate limiting - IP bazlı"""
     return ip_rate_limit(
-        max_requests=3,  # 3 registration per hour
+        max_requests=5,  # 5 registration per hour
         window_seconds=3600,  # 1 saat
         error_message="Çok fazla kayıt denemesi. Lütfen 1 saat bekleyin."
     )

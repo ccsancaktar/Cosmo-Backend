@@ -70,6 +70,7 @@ limiter = create_limiter(app)
 # Blueprint'leri kaydet
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
 app.register_blueprint(readings_bp, url_prefix='/api/readings')
+limiter.exempt(tokens_bp)
 app.register_blueprint(tokens_bp, url_prefix='/api/tokens')
 app.register_blueprint(premium_bp, url_prefix='/api/premium')
 app.register_blueprint(payment_bp, url_prefix='/api/payment')
