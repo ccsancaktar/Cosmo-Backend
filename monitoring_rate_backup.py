@@ -195,7 +195,6 @@ def get_rate_limiting_metrics():
     """Rate limiting metriklerini topla"""
     try:
         # Basit rate limiting metrikleri (şimdilik mock data)
-        total_limits = len(redis_manager.redis_client.keys("LIMITS:LIMITER/*"))
         rate_limits = {
             "api_calls": {
                 "total_requests": len(redis_manager.redis_client.keys("LIMITS:LIMITER/*")) * 10,

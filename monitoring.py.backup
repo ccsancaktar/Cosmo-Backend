@@ -4,7 +4,6 @@ import time
 import os
 import subprocess
 from models import db
-from redis_manager import redis_manager
 import json
 
 monitoring_bp = Blueprint('monitoring', __name__)
@@ -130,7 +129,6 @@ def get_business_metrics():
 
 # Main monitoring endpoint
 @monitoring_bp.route('/dashboard', methods=['GET'])
-# System metrics endpoint@monitoring_bp.route("/system", methods=["GET"])def system_metrics_endpoint():    """Sistem metrikleri endpoint"i"""    try:        metrics = get_system_metrics()        if "error" in metrics:            return jsonify(metrics), 500        return jsonify({            "status": "success",            "data": metrics,            "timestamp": datetime.utcnow().isoformat()        })    except Exception as e:        return jsonify({            "status": "error",            "error": str(e),            "timestamp": datetime.utcnow().isoformat()        }), 500
 def get_monitoring_dashboard():
     """Ana monitoring dashboard endpoint'i"""
     try:
@@ -195,22 +193,21 @@ def get_rate_limiting_metrics():
     """Rate limiting metriklerini topla"""
     try:
         # Basit rate limiting metrikleri (şimdilik mock data)
-        total_limits = len(redis_manager.redis_client.keys("LIMITS:LIMITER/*"))
         rate_limits = {
             "api_calls": {
-                "total_requests": len(redis_manager.redis_client.keys("LIMITS:LIMITER/*")) * 10,
-                "blocked_requests": max(0, len(redis_manager.redis_client.keys("LIMITS:LIMITER/*")) - 5),
+                "total_requests": 1250,
+                "blocked_requests": 23,
                 "current_window": 45
             },
             "user_requests": {
-                "total_requests": len(redis_manager.redis_client.keys("LIMITS:LIMITER/*")) * 10 * 0,
-                "blocked_requests": max(0, len(redis_manager.redis_client.keys("LIMITS:LIMITER/*")) - 5),
-                "active_users": len(redis_manager.redis_client.keys("LIMITS:LIMITER/*"))
+                "total_requests": 890,
+                "blocked_requests": 12,
+                "active_users": 67
             },
             "ip_requests": {
-                "total_requests": len(redis_manager.redis_client.keys("LIMITS:LIMITER/*")) * 10,
-                "blocked_requests": max(0, len(redis_manager.redis_client.keys("LIMITS:LIMITER/*")) - 5),
-                "blocked_ips": len(redis_manager.redis_client.keys("LIMITS:LIMITER/*"))
+                "total_requests": 2100,
+                "blocked_requests": 89,
+                "blocked_ips": 15
             }
         }
         
@@ -245,63 +242,3 @@ def get_monitoring_dashboard():
             'error': str(e),
             'timestamp': datetime.utcnow().isoformat()
         }), 500
-
-# System metrics endpoint
-@monitoring_bp.route("/system", methods=["GET"])
-def system_metrics_endpoint():
-    """Sistem metrikleri endpoint"i"""
-    try:
-        metrics = get_system_metrics()
-        if "error" in metrics:
-            return jsonify(metrics), 500
-        return jsonify({"status": "success", "data": metrics})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# App metrics endpoint
-@monitoring_bp.route("/app", methods=["GET"])
-def app_metrics_endpoint():
-    """Uygulama metrikleri endpoint"i"""
-    try:
-        metrics = get_app_metrics()
-        if "error" in metrics:
-            return jsonify(metrics), 500
-        return jsonify({"status": "success", "data": metrics})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# Business metrics endpoint
-@monitoring_bp.route("/business", methods=["GET"])
-def business_metrics_endpoint():
-    """İş metrikleri endpoint"i"""
-    try:
-        metrics = get_business_metrics()
-        if "error" in metrics:
-            return jsonify(metrics), 500
-        return jsonify({"status": "success", "data": metrics})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# Performance metrics endpoint
-@monitoring_bp.route("/performance", methods=["GET"])
-def performance_metrics_endpoint():
-    """Performans metrikleri endpoint"i"""
-    try:
-        metrics = get_performance_metrics()
-        if "error" in metrics:
-            return jsonify(metrics), 500
-        return jsonify({"status": "success", "data": metrics})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# Rate limits metrics endpoint
-@monitoring_bp.route("/rate-limits", methods=["GET"])
-def rate_limits_metrics_endpoint():
-    """Rate limits metrikleri endpoint"i"""
-    try:
-        metrics = get_rate_limiting_metrics()
-        if "error" in metrics:
-            return jsonify(metrics), 500
-        return jsonify({"status": "success", "data": metrics})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500

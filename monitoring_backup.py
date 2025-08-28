@@ -4,7 +4,6 @@ import time
 import os
 import subprocess
 from models import db
-from redis_manager import redis_manager
 import json
 
 monitoring_bp = Blueprint('monitoring', __name__)
@@ -195,22 +194,21 @@ def get_rate_limiting_metrics():
     """Rate limiting metriklerini topla"""
     try:
         # Basit rate limiting metrikleri (şimdilik mock data)
-        total_limits = len(redis_manager.redis_client.keys("LIMITS:LIMITER/*"))
         rate_limits = {
             "api_calls": {
-                "total_requests": len(redis_manager.redis_client.keys("LIMITS:LIMITER/*")) * 10,
-                "blocked_requests": max(0, len(redis_manager.redis_client.keys("LIMITS:LIMITER/*")) - 5),
+                "total_requests": 1250,
+                "blocked_requests": 23,
                 "current_window": 45
             },
             "user_requests": {
-                "total_requests": len(redis_manager.redis_client.keys("LIMITS:LIMITER/*")) * 10 * 0,
-                "blocked_requests": max(0, len(redis_manager.redis_client.keys("LIMITS:LIMITER/*")) - 5),
-                "active_users": len(redis_manager.redis_client.keys("LIMITS:LIMITER/*"))
+                "total_requests": 890,
+                "blocked_requests": 12,
+                "active_users": 67
             },
             "ip_requests": {
-                "total_requests": len(redis_manager.redis_client.keys("LIMITS:LIMITER/*")) * 10,
-                "blocked_requests": max(0, len(redis_manager.redis_client.keys("LIMITS:LIMITER/*")) - 5),
-                "blocked_ips": len(redis_manager.redis_client.keys("LIMITS:LIMITER/*"))
+                "total_requests": 2100,
+                "blocked_requests": 89,
+                "blocked_ips": 15
             }
         }
         
