@@ -47,7 +47,7 @@ def get_tarot_prompt(language, **kwargs):
         
         Soru: {soru}
         
-        Seçilen Kartlar: {', '.join([f"{card['name']} ({card['suit']})" for card in cards])}
+        Seçilen Kartlar: {', '.join([f"{card['name']} ({card['key']})" for card in cards])}
         
         Lütfen şu konuları kapsayan detaylı bir tarot yorumu yap:
         1. Kartların genel enerjisi ve mesajı
@@ -67,7 +67,7 @@ def get_tarot_prompt(language, **kwargs):
         
         Question: {soru}
         
-        Selected Cards: {', '.join([f"{card['name']} ({card['suit']})" for card in cards])}
+        Selected Cards: {', '.join([f"{card['name']} ({card['key']})" for card in cards])}
         
         Please provide a detailed tarot reading covering these topics:
         1. General energy and message of the cards
@@ -87,7 +87,7 @@ def get_tarot_prompt(language, **kwargs):
         
         Frage: {soru}
         
-        Ausgewählte Karten: {', '.join([f"{card['name']} ({card['suit']})" for card in cards])}
+        Ausgewählte Karten: {', '.join([f"{card['name']} ({card['key']})" for card in cards])}
         
         Bitte erstelle eine detaillierte Tarot-Deutung, die diese Themen abdeckt:
         1. Allgemeine Energie und Botschaft der Karten
@@ -168,9 +168,13 @@ def get_rune_prompt(language, **kwargs):
 
 # Çin falı prompt'ları
 def get_chinese_prompt(language, **kwargs):
+    dogum_tarihi = kwargs.get("dogumTarihi", "")
+    dogum_saati = kwargs.get("dogumSaati", "")
+    ba_zi_result = kwargs.get("ba_zi", {})
+    element_counts = kwargs.get("element_counts", "")
     dogum_tarihi = kwargs.get('dogumTarihi', '')
     dogum_saati = kwargs.get('dogumSaati', '')
-    ba_zi_result = kwargs.get('ba_zi', {})
+    
     element_counts = kwargs.get('element_counts', '')
     
     if language == 'tr':
@@ -181,12 +185,12 @@ def get_chinese_prompt(language, **kwargs):
         Doğum Saati: {dogum_saati}
         
         Ba Zi Analizi:
-        - Yıl elementi: {ba_zi_result.get('year_element', 'Bilinmiyor')}
-        - Ay elementi: {ba_zi_result.get('month_element', 'Bilinmiyor')}
-        - Gün elementi: {ba_zi_result.get('day_element', 'Bilinmiyor')}
-        - Saat elementi: {ba_zi_result.get('hour_element', 'Bilinmiyor')}
         
-        Element dağılımı: {element_counts}
+        
+        
+        
+        
+        
         
         Lütfen şu konuları kapsayan detaylı bir Çin falı yorumu yap:
         
@@ -472,7 +476,7 @@ def get_kabala_prompt(language, **kwargs):
     selected_sefirot = kwargs.get('selected_sefirot', [])
     
     sefirot_info = '\n'.join([
-        f"- {sef['name']}: {sef['description']}"
+        f"- {sef['name']}: {sef['meaning']}"
         for sef in selected_sefirot
     ])
     
