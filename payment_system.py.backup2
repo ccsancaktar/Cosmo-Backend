@@ -214,15 +214,17 @@ def create_premium_subscription():
             return jsonify({'error': 'Plan türü gereklidir'}), 400
         
         # Plan fiyatlarını kontrol et
-        # Plan fiyatlarını env'den al
-        from models import PREMIUM_PRICES
+        plan_prices = {
+            'premium_monthly": 49.99,
+            'premium_yearly": 399.99,
+            'premium_plus_monthly': 49.99,
+            'premium_plus_yearly': 499.99
+        }
         
-        if plan_type not in PREMIUM_PRICES:
-            return jsonify({"error": "Geçersiz plan türü"}), 400
+        if plan_type not in plan_prices:
+            return jsonify({'error': 'Geçersiz plan türü'}), 400
         
-        price = PREMIUM_PRICES[plan_type]
-        
-        
+        price = plan_prices[plan_type]
         
         # Stripe customer oluştur veya mevcut olanı bul
         customer = None
