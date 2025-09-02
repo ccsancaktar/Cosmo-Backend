@@ -40,7 +40,7 @@ def register():
         data = request.get_json()
         
         # Gerekli alanları kontrol et
-        required_fields = ['username', 'email', 'password', 'first_name', 'last_name']
+        required_fields = ['username', 'email', 'password', 'first_name', ]
         for field in required_fields:
             if not data.get(field):
                 return jsonify({'error': f'{field} alanı gereklidir'}), 400
@@ -69,7 +69,6 @@ def register():
             username=data['username'],
             email=data['email'],
             first_name=data['first_name'],
-            last_name=data['last_name'],
             birth_date=datetime.strptime(data['birth_date'], '%Y-%m-%d').date() if data.get('birth_date') else None,
             birth_time=datetime.strptime(data['birth_time'], '%H:%M').time() if data.get('birth_time') else None,
             birth_place=data.get('birth_place'),
@@ -180,7 +179,7 @@ def update_profile():
         
         # Güncellenebilir alanlar
         updatable_fields = [
-            'first_name', 'last_name', 'phone', 'profile_image',
+            'first_name', 'phone', 'profile_image',
             'birth_date', 'birth_time', 'birth_place',
             'theme', 'language', 'notifications_enabled', 'privacy_level'
         ]
@@ -404,7 +403,6 @@ def google_callback():
                 username=username,
                 email=email,
                 first_name=first_name,
-                last_name=last_name,
                 google_id=google_id,
                 profile_picture=picture
             )
@@ -470,7 +468,6 @@ def google_verify():
                 username=username,
                 email=email,
                 first_name=first_name,
-                last_name=last_name,
                 google_id=google_id,
                 profile_picture=picture
             )

@@ -69,7 +69,7 @@ def register_chinese_routes(app):
             
             for pillar in ['year', 'month', 'day', 'hour']:
                 if pillar in ba_zi_result:
-                    element = ba_zi_result[pillar]['element']
+                    element = ba_zi_result[f"{pillar}_element"]
                     element_counts[element] += 1
             
             # Çok dilli prompt sistemi kullan

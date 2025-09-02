@@ -98,10 +98,15 @@ def calculate_ba_zi(birth_date: str, birth_time: str) -> Dict:
         date_obj = datetime.datetime.strptime(f"{birth_date} {birth_time}", "%Y-%m-%d %H:%M")
         
         # Yıl, ay, gün, saat elementlerini hesapla
+        print(f"DEBUG: Date: {date_obj}, Year: {date_obj.year}, Month: {date_obj.month}, Day: {date_obj.day}, Hour: {date_obj.hour}")
         year_element = YEAR_ELEMENTS[date_obj.year % 10]
+        print(f"DEBUG: Year element: {year_element}")
         month_element = MONTH_ELEMENTS[date_obj.month]
+        print(f"DEBUG: Month element: {month_element}")
         day_element = DAY_ELEMENTS[date_obj.day]
+        print(f"DEBUG: Day element: {day_element}")
         hour_element = HOUR_ELEMENTS[date_obj.hour]
+        print(f"DEBUG: Hour element: {hour_element}")
         
         # Yin-Yang analizi
         yin_yang_balance = analyze_yin_yang([year_element, month_element, day_element, hour_element])

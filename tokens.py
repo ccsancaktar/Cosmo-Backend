@@ -135,7 +135,7 @@ def video_reward():
         
         # AdMob'dan gelen reward miktarını al
         data = request.get_json()
-        reward_amount = data.get('reward_amount', 10)  # Sabit 10 token
+        reward_amount = data.get("reward_amount", int(os.getenv("VIDEO_REWARD_TOKENS", 10)))
         
         # 24 saat içindeki video sayısını kontrol et
         last_24_hours = datetime.now() - timedelta(hours=24)
@@ -251,7 +251,7 @@ def daily_bonus():
             }), 400
         
         # Bonus token ver
-        bonus_amount = 5  # Sabit 5 token
+        bonus_amount = int(os.getenv("FREE_DAILY_BONUS_TOKENS", 3))
         transaction = TokenTransaction(
             user_id=str(user._id),
             transaction_type='daily_bonus',
@@ -366,7 +366,7 @@ def spend_tokens_for_reading(user_id, reading_type):
 def add_registration_bonus(user_id):
     """Yeni kullanıcıya kayıt bonusu ver"""
     try:
-        bonus_amount = 50  # Sabit 50 token
+        bonus_amount = int(os.getenv("REGISTRATION_BONUS_TOKENS", 30))
         transaction = TokenTransaction(
             user_id=user_id,
             transaction_type='registration_bonus',
