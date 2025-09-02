@@ -528,11 +528,11 @@ def calculate_chinese_element(birth_date_str, birth_time_str=None):
         return None
 
 class TokenTransaction:
-    def __init__(self, user_id, transaction_type, amount, description=None, package_id=None, stripe_payment_intent_id=None):
+    def __init__(self, user_id, transaction_type, amount, package_id=None, stripe_payment_intent_id=None):
         self.user_id = user_id
         self.transaction_type = transaction_type  # 'purchase', 'spend', 'bonus', 'video_reward', 'refund'
         self.amount = amount  # Pozitif: alım/bonus, Negatif: harcama
-        self.description = description
+        
         self.package_id = package_id
         self.stripe_payment_intent_id = stripe_payment_intent_id
         self.created_at = datetime.now()
@@ -542,7 +542,6 @@ class TokenTransaction:
             'user_id': self.user_id,
             'transaction_type': self.transaction_type,
             'amount': self.amount,
-            'description': self.description,
             'package_id': self.package_id,
             'stripe_payment_intent_id': self.stripe_payment_intent_id,
             'created_at': self.created_at
@@ -561,7 +560,6 @@ class TokenTransaction:
             'id': str(self._id) if hasattr(self, '_id') else None,
             'transaction_type': self.transaction_type,
             'amount': self.amount,
-            'description': self.description,
             'package_id': self.package_id,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
@@ -587,11 +585,11 @@ class TokenTransaction:
             return []
 
 class TokenPackage:
-    def __init__(self, name, token_amount, price, description, is_active=True):
+    def __init__(self, name, token_amount, price, is_active=True):
         self.name = name
         self.token_amount = token_amount
         self.price = price  # TL cinsinden
-        self.description = description
+        
         self.is_active = is_active
         self.created_at = datetime.now()
     
@@ -600,7 +598,6 @@ class TokenPackage:
             'name': self.name,
             'token_amount': self.token_amount,
             'price': self.price,
-            'description': self.description,
             'is_active': self.is_active,
             'created_at': self.created_at
         }
@@ -619,7 +616,6 @@ class TokenPackage:
             'name': self.name,
             'token_amount': self.token_amount,
             'price': self.price,
-            'description': self.description,
             'is_active': self.is_active
         }
     
@@ -633,7 +629,7 @@ class TokenPackage:
             package.name = package_data['name']
             package.token_amount = package_data['token_amount']
             package.price = package_data['price']
-            package.description = package_data['description']
+            
             package.is_active = package_data['is_active']
             packages.append(package)
         return packages
