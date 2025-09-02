@@ -21,7 +21,7 @@ def register_coffee_routes(app):
             data = request.get_json()
             
             # Gerekli alanları kontrol et
-            required_fields = []
+            required_fields = ['soru']
             for field in required_fields:
                 if not data.get(field):
                     return jsonify({'error': f'{field} alanı gereklidir'}), 422
@@ -43,7 +43,7 @@ def register_coffee_routes(app):
                 user = User.find_by_id(user_id)
             
             # Cache key oluştur (dil parametresi ile)
-            cache_key = f'coffee:images:{language}:{user_id}'
+            cache_key = f'coffee:{data["soru"]}:{language}:{user_id}'
             
             # Cache'den kontrol et
             cached_result = redis_manager.get(cache_key)
@@ -60,7 +60,7 @@ def register_coffee_routes(app):
             prompt = get_prompt_by_language(
                 'coffee',
                 language,
-                soru="Kahve fincanındaki işaretleri yorumla"
+                soru=data['soru']
             )
             
             print(f'Coffee prompt: {prompt}')
@@ -80,7 +80,7 @@ def register_coffee_routes(app):
             except Exception as g4f_error:
                 print(f'Coffee G4F hatası: {str(g4f_error)}')
                 # Fallback yorum
-                yorum = f'☕ Kahve Falı Yorumu ☕\n\nKahve Fincanı Yorumu\n\nKahve fincanınızdaki işaretlere göre, hayatınızda önemli mesajlar bulunmaktadır.\nGeleneksel kahve falı bilgeliği, sorduğunuz konuda size rehberlik etmektedir.\n\nGeçmişten gelen etkiler, bugünkü durumunuzu şekillendirmekte ve geleceğe dair ipuçları vermektedir.\n\nKahve falının rehberliğinde, hayatınızda yeni fırsatlar ve değişimler yaklaşmaktadır.'
+                yorum = f'☕ Kahve Falı Yorumu ☕\n\nSoru: {data["soru"]}\n\nKahve fincanınızdaki işaretlere göre, hayatınızda önemli mesajlar bulunmaktadır.\nGeleneksel kahve falı bilgeliği, sorduğunuz konuda size rehberlik etmektedir.\n\nGeçmişten gelen etkiler, bugünkü durumunuzu şekillendirmekte ve geleceğe dair ipuçları vermektedir.\n\nKahve falının rehberliğinde, hayatınızda yeni fırsatlar ve değişimler yaklaşmaktadır.'
             
             # Reading'i kaydet
             reading = Reading(

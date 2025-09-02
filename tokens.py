@@ -81,7 +81,6 @@ def purchase_tokens():
                 user_id=str(user._id),
                 transaction_type='purchase',
                 amount=package_data['token_amount'],
-                description=f"{package_data['name']} paketi satın alındı",
                 package_id=str(package_data['_id'])
             )
             transaction.save()
@@ -154,7 +153,6 @@ def video_reward():
             user_id=str(user._id),
             transaction_type='video_reward',
             amount=reward_amount,
-            description='Video izleme ödülü'
         )
         transaction.save()
         
@@ -256,7 +254,6 @@ def daily_bonus():
             user_id=str(user._id),
             transaction_type='daily_bonus',
             amount=bonus_amount,
-            description='Günlük bonus token'
         )
         transaction.save()
         
@@ -350,7 +347,7 @@ def spend_tokens_for_reading(user_id, reading_type):
             user_id=str(user._id),
             transaction_type='spend',
             amount=-cost,  # Negatif değer = harcama
-            description=f"{reading_type} falı için token harcandı"
+            
         )
         transaction.save()
         
@@ -371,7 +368,6 @@ def add_registration_bonus(user_id):
             user_id=user_id,
             transaction_type='registration_bonus',
             amount=bonus_amount,
-            description='Kayıt bonusu'
         )
         transaction.save()
         return True
