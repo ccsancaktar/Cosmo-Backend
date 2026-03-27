@@ -1,6 +1,6 @@
-# 🌟 CosmoFinder - Fal ve Astroloji Uygulaması (Eglence Amaclidir)
+# 🌟 CosmoFinder - Fal ve Astroloji Uygulaması
 
-**CosmoFinder**, modern teknoloji ile antik bilgileri bir araya getiren Yapay zeka destekli kapsamlı bir fal ve astroloji uygulamasıdır.
+**CosmoFinder**, modern teknoloji ile antik bilgileri bir araya getiren Yapay zeka destekli kapsamlı bir fal ve astroloji uygulamasıdır. (Eglence Amaclidir)
 
 ![React Native](https://img.shields.io/badge/React%20Native-0.79.5-green)
 ![Python](https://img.shields.io/badge/Python-Flask-blue)
